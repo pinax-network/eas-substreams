@@ -67,6 +67,7 @@ fn parse_schema_fields(schema: &str) -> Vec<(ParamType, String)> {
                 "uint256" => ParamType::Uint(256),
                 "bool" => ParamType::Bool,
                 "string" => ParamType::String,
+                "bytes" => ParamType::Bytes,
                 "address" => ParamType::Address,
                 _ => panic!("Unsupported type: {}", typ),
             }
@@ -84,13 +85,26 @@ fn parse_schema_fields(schema: &str) -> Vec<(ParamType, String)> {
             ')' => depth -= 1,
             ',' if depth == 0 => {
                 let field = &schema[start..i];
-                let mut parts = field.trim().split_whitespace();
-                let typ = parts.next().unwrap();
-                let name = parts
-                    .next()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "field".to_string());
-                fields.push((parse_type(typ), name));
+                // Improved: Find last whitespace outside parentheses for type/name split
+                let mut type_end = 0;
+                let mut inner_depth = 0;
+                for (j, ch) in field.char_indices().rev() {
+                    match ch {
+                        ')' => inner_depth += 1,
+                        '(' => inner_depth -= 1,
+                        ' ' if inner_depth == 0 => {
+                            type_end = j;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                let (typ, name) = if type_end > 0 {
+                    (field[..type_end].trim(), field[type_end..].trim())
+                } else {
+                    (field.trim(), "field")
+                };
+                fields.push((parse_type(typ), name.to_string()));
                 start = i + 1;
             }
             _ => {}
@@ -99,13 +113,25 @@ fn parse_schema_fields(schema: &str) -> Vec<(ParamType, String)> {
     // Last field
     if start < schema.len() {
         let field = &schema[start..];
-        let mut parts = field.trim().split_whitespace();
-        let typ = parts.next().unwrap();
-        let name = parts
-            .next()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "field".to_string());
-        fields.push((parse_type(typ), name));
+        let mut type_end = 0;
+        let mut inner_depth = 0;
+        for (j, ch) in field.char_indices().rev() {
+            match ch {
+                ')' => inner_depth += 1,
+                '(' => inner_depth -= 1,
+                ' ' if inner_depth == 0 => {
+                    type_end = j;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let (typ, name) = if type_end > 0 {
+            (field[..type_end].trim(), field[type_end..].trim())
+        } else {
+            (field.trim(), "field")
+        };
+        fields.push((parse_type(typ), name.to_string()));
     }
     fields
 }
