@@ -48,7 +48,7 @@ pub struct Schema {
     pub schema: String,
 }
 
-fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
+fn extract_attesteds(blk: &eth::Block, events: &mut contract::Events) {
     events.eas_attesteds.append(
         &mut blk
             .receipts()
@@ -85,6 +85,9 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
             })
             .collect(),
     );
+}
+
+fn extract_revokeds(blk: &eth::Block, events: &mut contract::Events) {
     events.eas_revokeds.append(
         &mut blk
             .receipts()
@@ -108,6 +111,9 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
             })
             .collect(),
     );
+}
+
+fn extract_revoked_offchains(blk: &eth::Block, events: &mut contract::Events) {
     events.eas_revoked_offchains.append(
         &mut blk
             .receipts()
@@ -130,6 +136,9 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
             })
             .collect(),
     );
+}
+
+fn extract_timestampeds(blk: &eth::Block, events: &mut contract::Events) {
     events.eas_timestampeds.append(
         &mut blk
             .receipts()
@@ -155,6 +164,9 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
 #[substreams::handlers::map]
 fn map_events(blk: eth::Block) -> Result<contract::Events, substreams::errors::Error> {
     let mut events = contract::Events::default();
-    map_eas_events(&blk, &mut events);
+    extract_attesteds(&blk, &mut events);
+    extract_revokeds(&blk, &mut events);
+    extract_revoked_offchains(&blk, &mut events);
+    extract_timestampeds(&blk, &mut events);
     Ok(events)
 }
