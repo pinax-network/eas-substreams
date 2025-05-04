@@ -19,18 +19,11 @@ const EAS_SCHEMA_REGISTRY_CONTRACT: [u8; 20] = hex!("420000000000000000000000000
 pub fn decode_data(data: &[u8], schema_signature: &str) -> Map<String, Value> {
     let fields = schema_parser::parse_schema_fields(schema_signature);
     let types = fields.iter().map(|(t, _)| schema_parser::fieldtype_to_paramtype(t)).collect::<Vec<_>>();
-    let tokens = match decode(&types, data) {
-        Ok(tokens) => tokens,
-        Err(e) => {
-            substreams::log::info!("Failed to decode data: {:?}", e);
-            vec![]
-        }
-    };
-    let mut obj = Map::new();
-    for ((ft, name), token) in fields.into_iter().zip(tokens.into_iter()) {
+    let tokens = decode(&types, data).expect(format!("Failed to decode data with schema: {}", schema_signature).as_str());
+    fields.into_iter().zip(tokens.into_iter()).fold(Map::new(), |mut obj, ((ft, name), token)| {
         obj.insert(name, schema_parser::token_to_json_with_schema(&ft, &token));
-    }
-    obj
+        obj
+    })
 }
 
 #[derive(Debug, Clone)]
