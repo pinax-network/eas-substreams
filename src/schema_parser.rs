@@ -40,9 +40,29 @@ impl FromStr for FieldType {
     }
 }
 
-/// Parses a schema signature string into a Vec<(FieldType, String)>.
+fn parse_field(field: &str) -> (FieldType, String) {
+    let mut type_end = 0;
+    let mut inner_depth = 0;
+    for (j, ch) in field.char_indices().rev() {
+        match ch {
+            ')' => inner_depth += 1,
+            '(' => inner_depth -= 1,
+            ' ' if inner_depth == 0 => {
+                type_end = j;
+                break;
+            }
+            _ => {}
+        }
+    }
+    let (typ, name) = if type_end > 0 {
+        (field[..type_end].trim(), field[type_end..].trim())
+    } else {
+        (field.trim(), "field")
+    };
+    (FieldType::from_str(typ).expect(&format!("failed to parse type: {}", typ)), name.to_string())
+}
+
 pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
-    // Split schema by commas, but handle nested tuples (do not split inside parentheses)
     let mut fields = Vec::new();
     let mut depth = 0;
     let mut start = 0;
@@ -53,28 +73,7 @@ pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
             ')' => depth -= 1,
             ',' if depth == 0 => {
                 let field = &schema[start..i];
-                let mut type_end = 0;
-                let mut inner_depth = 0;
-                for (j, ch) in field.char_indices().rev() {
-                    match ch {
-                        ')' => inner_depth += 1,
-                        '(' => inner_depth -= 1,
-                        ' ' if inner_depth == 0 => {
-                            type_end = j;
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-                let (typ, name) = if type_end > 0 {
-                    (field[..type_end].trim(), field[type_end..].trim())
-                } else {
-                    (field.trim(), "field")
-                };
-                fields.push((
-                    FieldType::from_str(typ).expect(format!("failed to parse type: {}", typ).as_str()),
-                    name.to_string(),
-                ));
+                fields.push(parse_field(field));
                 start = i + 1;
             }
             _ => {}
@@ -83,28 +82,7 @@ pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
     // Last field
     if start < schema.len() {
         let field = &schema[start..];
-        let mut type_end = 0;
-        let mut inner_depth = 0;
-        for (j, ch) in field.char_indices().rev() {
-            match ch {
-                ')' => inner_depth += 1,
-                '(' => inner_depth -= 1,
-                ' ' if inner_depth == 0 => {
-                    type_end = j;
-                    break;
-                }
-                _ => {}
-            }
-        }
-        let (typ, name) = if type_end > 0 {
-            (field[..type_end].trim(), field[type_end..].trim())
-        } else {
-            (field.trim(), "field")
-        };
-        fields.push((
-            FieldType::from_str(typ).expect(format!("failed to parse type: {}", typ).as_str()),
-            name.to_string(),
-        ));
+        fields.push(parse_field(field));
     }
     fields
 }
