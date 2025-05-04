@@ -67,21 +67,24 @@ fn extract_attesteds(blk: &eth::Block, events: &mut contract::Events) {
         })
         .collect();
 
-    for chunk in attested_events.chunks(100) {
-        let attestation_responses = chunk
-            .iter()
-            .fold(RpcBatch::new(), |batch, (_, _, event)| {
-                batch.add(GetAttestation { uid: event.uid }, EAS_TRACKED_CONTRACT.to_vec())
-            })
-            .execute()
-            .expect("failed to execute attestation RPC batch")
-            .responses;
+    if attested_events.is_empty() {
+        return;
+    }
 
-        let mut schema_ids = std::collections::HashSet::new();
-        let attestations: Vec<_> = attestation_responses
-            .into_iter()
-            .map(|response| {
-                let attestation = RpcBatch::decode::<
+    let all_attestations = attested_events
+        .chunks(100)
+        .flat_map(|chunk| {
+            let responses = chunk
+                .iter()
+                .fold(RpcBatch::new(), |batch, (_, _, event)| {
+                    batch.add(GetAttestation { uid: event.uid }, EAS_TRACKED_CONTRACT.to_vec())
+                })
+                .execute()
+                .expect("failed to execute GetAttestation RPC batch")
+                .responses;
+
+            responses.into_iter().map(|response| {
+                RpcBatch::decode::<
                     (
                         [u8; 32],                   // uid
                         [u8; 32],                   // schema
@@ -96,60 +99,64 @@ fn extract_attesteds(blk: &eth::Block, events: &mut contract::Events) {
                     ),
                     GetAttestation,
                 >(&response)
-                .expect("failed to decode attestation");
-
-                schema_ids.insert(attestation.1);
-
-                attestation
+                .expect("failed to decode GetAttestation response")
             })
-            .collect();
+        })
+        .collect::<Vec<_>>();
 
-        let schema_ids: Vec<_> = schema_ids.into_iter().collect();
+    let schema_ids: Vec<_> = all_attestations
+        .iter()
+        .map(|attestation| attestation.1)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
 
-        let schema_responses = schema_ids
-            .iter()
-            .fold(RpcBatch::new(), |batch, schema_id| {
-                batch.add(GetSchema { uid: *schema_id }, EAS_SCHEMA_REGISTRY_CONTRACT.to_vec())
+    let schemas: std::collections::HashMap<[u8; 32], String> = schema_ids
+        .chunks(100)
+        .flat_map(|chunk| {
+            let responses = chunk
+                .iter()
+                .fold(RpcBatch::new(), |batch, schema_id| {
+                    batch.add(GetSchema { uid: *schema_id }, EAS_SCHEMA_REGISTRY_CONTRACT.to_vec())
+                })
+                .execute()
+                .expect("failed to execute GetSchema RPC batch")
+                .responses;
+
+            responses.into_iter().map(|response| {
+                let schema = RpcBatch::decode::<
+                    (
+                        [u8; 32], // uid
+                        Vec<u8>,  // resolver
+                        bool,     // revocable
+                        String,   // schema
+                    ),
+                    GetSchema,
+                >(&response)
+                .expect("failed to decode GetSchema response");
+
+                (schema.0, schema.3)
             })
-            .execute()
-            .expect("failed to execute schema RPC batch")
-            .responses;
+        })
+        .collect();
 
-        let schema_map = schema_responses.into_iter().fold(std::collections::HashMap::new(), |mut map, response| {
-            let schema = RpcBatch::decode::<
-                (
-                    [u8; 32], // uid
-                    Vec<u8>,  // resolver
-                    bool,     // revocable
-                    String,   // schema
-                ),
-                GetSchema,
-            >(&response)
-            .expect("failed to decode schema");
+    for ((view, log, event), attestation) in attested_events.into_iter().zip(all_attestations.into_iter()) {
+        let schema = schemas.get(&attestation.1).expect("schema should exist in map");
+        let decoded_json = serde_json::Value::Object(decode_data(&attestation.9, schema));
 
-            map.insert(schema.0, schema.3);
-            map
+        events.eas_attesteds.push(contract::EasAttested {
+            evt_tx_hash: view.transaction.hash.clone(),
+            evt_index: log.block_index,
+            evt_block_time: Some(blk.timestamp().to_owned()),
+            evt_block_number: blk.number,
+            attester: event.attester,
+            recipient: event.recipient,
+            schema_id: Vec::from(event.schema),
+            uid: Vec::from(event.uid),
+            data: attestation.9,
+            schema: schema.to_string(),
+            decoded_data: decoded_json.to_string(),
         });
-
-        // Create EasAttested objects and add to events
-        for ((view, log, event), attestation) in chunk.iter().zip(attestations.iter()) {
-            let schema = schema_map.get(&attestation.1).expect("schema should exist in map");
-            let decoded_json = serde_json::Value::Object(decode_data(&attestation.9, schema));
-
-            events.eas_attesteds.push(contract::EasAttested {
-                evt_tx_hash: view.transaction.hash.clone(),
-                evt_index: log.block_index,
-                evt_block_time: Some(blk.timestamp().to_owned()),
-                evt_block_number: blk.number,
-                attester: event.attester.clone(),
-                recipient: event.recipient.clone(),
-                schema_id: Vec::from(event.schema),
-                uid: Vec::from(event.uid),
-                data: attestation.9.clone(),
-                schema: schema.to_string(),
-                decoded_data: decoded_json.to_string(),
-            });
-        }
     }
 }
 
