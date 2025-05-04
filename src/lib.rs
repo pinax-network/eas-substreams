@@ -83,7 +83,7 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
                         let decoded_json = serde_json::Value::Object(decode_data(&data, &schema));
 
                         return Some(contract::EasAttested {
-                            evt_tx_hash: Hex(&view.transaction.hash).to_string(),
+                            evt_tx_hash: bytes_to_hex(&view.transaction.hash),
                             evt_index: log.block_index,
                             evt_block_time: Some(blk.timestamp().to_owned()),
                             evt_block_number: blk.number,
@@ -108,7 +108,7 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
                 view.receipt.logs.iter().filter(|log| log.address == EAS_TRACKED_CONTRACT).filter_map(|log| {
                     if let Some(event) = abi::eas_contract::events::Revoked::match_and_decode(log) {
                         return Some(contract::EasRevoked {
-                            evt_tx_hash: Hex(&view.transaction.hash).to_string(),
+                            evt_tx_hash: bytes_to_hex(&view.transaction.hash),
                             evt_index: log.block_index,
                             evt_block_time: Some(blk.timestamp().to_owned()),
                             evt_block_number: blk.number,
@@ -131,7 +131,7 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
                 view.receipt.logs.iter().filter(|log| log.address == EAS_TRACKED_CONTRACT).filter_map(|log| {
                     if let Some(event) = abi::eas_contract::events::RevokedOffchain::match_and_decode(log) {
                         return Some(contract::EasRevokedOffchain {
-                            evt_tx_hash: Hex(&view.transaction.hash).to_string(),
+                            evt_tx_hash: bytes_to_hex(&view.transaction.hash),
                             evt_index: log.block_index,
                             evt_block_time: Some(blk.timestamp().to_owned()),
                             evt_block_number: blk.number,
@@ -153,7 +153,7 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
                 view.receipt.logs.iter().filter(|log| log.address == EAS_TRACKED_CONTRACT).filter_map(|log| {
                     if let Some(event) = abi::eas_contract::events::Timestamped::match_and_decode(log) {
                         return Some(contract::EasTimestamped {
-                            evt_tx_hash: Hex(&view.transaction.hash).to_string(),
+                            evt_tx_hash: bytes_to_hex(&view.transaction.hash),
                             evt_index: log.block_index,
                             evt_block_time: Some(blk.timestamp().to_owned()),
                             evt_block_number: blk.number,

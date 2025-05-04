@@ -4,7 +4,7 @@ package:
   version: v0.1.0
 
 imports:
-    ethcommon: https://spkg.io/streamingfast/ethereum-common-v0.3.0.spkg
+    ethcommon: https://spkg.io/streamingfast/ethereum-common-v0.3.1.spkg
 
 protobuf:
   files:
@@ -33,4 +33,4 @@ modules:
       - source: sf.ethereum.type.v2.Block
     output:
       type: proto:contract.v1.Events
-network: mainnet
+network: base
