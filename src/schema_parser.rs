@@ -73,7 +73,7 @@ pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
             ')' => depth -= 1,
             ',' if depth == 0 => {
                 let field = &schema[start..i];
-                fields.push(parse_field(field));
+                fields.push(parse_field(field.trim()));
                 start = i + 1;
             }
             _ => {}
@@ -82,8 +82,9 @@ pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
     // Last field
     if start < schema.len() {
         let field = &schema[start..];
-        fields.push(parse_field(field));
+        fields.push(parse_field(field.trim()));
     }
+    substreams::log::info!("Parsed schema fields: {:?}", fields);
     fields
 }
 
