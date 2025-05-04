@@ -9,50 +9,35 @@ pub enum FieldType {
     Array(Box<FieldType>),
 }
 
+fn parse_type(typ: &str) -> FieldType {
+    let typ = typ.trim();
+    if typ.starts_with("tuple(") && typ.ends_with(')') {
+        FieldType::Tuple(parse_schema_fields(&typ[6..typ.len() - 1]))
+    } else if typ.ends_with("[]") {
+        FieldType::Array(Box::new(parse_type(&typ[..typ.len() - 2])))
+    } else {
+        let param_type = if typ == "bytes" {
+            ParamType::Bytes
+        } else if let Some(bits) = typ.strip_prefix("uint") {
+            ParamType::Uint(bits.parse::<usize>().unwrap())
+        } else if let Some(bits) = typ.strip_prefix("int") {
+            ParamType::Int(bits.parse::<usize>().unwrap())
+        } else if let Some(bits) = typ.strip_prefix("bytes") {
+            ParamType::FixedBytes(bits.parse::<usize>().unwrap())
+        } else {
+            match typ {
+                "bool" => ParamType::Bool,
+                "string" => ParamType::String,
+                "address" => ParamType::Address,
+                _ => panic!("Unsupported type: {}", typ),
+            }
+        };
+        FieldType::Primitive(param_type)
+    }
+}
+
 /// Parses a schema signature string into a Vec<(FieldType, String)>.
 pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
-    fn parse_type(typ: &str) -> FieldType {
-        let typ = typ.trim();
-        if typ.starts_with("tuple(") && typ.ends_with(')') {
-            let inner = &typ[6..typ.len() - 1];
-            let fields = parse_schema_fields(inner);
-            FieldType::Tuple(fields)
-        } else if typ.ends_with("[]") {
-            let inner_type = &typ[..typ.len() - 2];
-            FieldType::Array(Box::new(parse_type(inner_type)))
-        } else {
-            let param_type = if let Some(bits) = typ.strip_prefix("uint") {
-                if let Ok(size) = bits.parse::<usize>() {
-                    ParamType::Uint(size)
-                } else {
-                    panic!("Unsupported uint type: {}", typ)
-                }
-            } else if let Some(bits) = typ.strip_prefix("int") {
-                if let Ok(size) = bits.parse::<usize>() {
-                    ParamType::Int(size)
-                } else {
-                    panic!("Unsupported int type: {}", typ)
-                }
-            } else if let Some(bits) = typ.strip_prefix("bytes") {
-                if bits.is_empty() {
-                    ParamType::Bytes
-                } else if let Ok(size) = bits.parse::<usize>() {
-                    ParamType::FixedBytes(size)
-                } else {
-                    panic!("Unsupported bytes type: {}", typ)
-                }
-            } else {
-                match typ {
-                    "bool" => ParamType::Bool,
-                    "string" => ParamType::String,
-                    "address" => ParamType::Address,
-                    _ => panic!("Unsupported type: {}", typ),
-                }
-            };
-            FieldType::Primitive(param_type)
-        }
-    }
-
     // Split schema by commas, but handle nested tuples (do not split inside parentheses)
     let mut fields = Vec::new();
     let mut depth = 0;
