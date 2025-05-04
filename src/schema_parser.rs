@@ -1,5 +1,6 @@
 use ethabi::{ParamType, Token};
 use serde_json::{json, Value};
+use std::str::FromStr;
 use substreams::Hex;
 
 #[derive(Debug, Clone)]
@@ -9,30 +10,33 @@ pub enum FieldType {
     Array(Box<FieldType>),
 }
 
-fn parse_type(typ: &str) -> FieldType {
-    let typ = typ.trim();
-    if typ.starts_with("tuple(") && typ.ends_with(')') {
-        FieldType::Tuple(parse_schema_fields(&typ[6..typ.len() - 1]))
-    } else if typ.ends_with("[]") {
-        FieldType::Array(Box::new(parse_type(&typ[..typ.len() - 2])))
-    } else {
-        let param_type = if typ == "bytes" {
-            ParamType::Bytes
-        } else if let Some(bits) = typ.strip_prefix("uint") {
-            ParamType::Uint(bits.parse::<usize>().unwrap())
-        } else if let Some(bits) = typ.strip_prefix("int") {
-            ParamType::Int(bits.parse::<usize>().unwrap())
-        } else if let Some(bits) = typ.strip_prefix("bytes") {
-            ParamType::FixedBytes(bits.parse::<usize>().unwrap())
+impl FromStr for FieldType {
+    type Err = String;
+    fn from_str(typ: &str) -> Result<Self, Self::Err> {
+        let typ = typ.trim();
+        if typ.starts_with("tuple(") && typ.ends_with(')') {
+            Ok(FieldType::Tuple(parse_schema_fields(&typ[6..typ.len() - 1])))
+        } else if typ.ends_with("[]") {
+            Ok(FieldType::Array(Box::new(FieldType::from_str(&typ[..typ.len() - 2])?)))
         } else {
-            match typ {
-                "bool" => ParamType::Bool,
-                "string" => ParamType::String,
-                "address" => ParamType::Address,
-                _ => panic!("Unsupported type: {}", typ),
-            }
-        };
-        FieldType::Primitive(param_type)
+            let param_type = if typ == "bytes" {
+                ParamType::Bytes
+            } else if let Some(bits) = typ.strip_prefix("uint") {
+                ParamType::Uint(bits.parse::<usize>().map_err(|_| format!("Invalid uint size: {}", bits))?)
+            } else if let Some(bits) = typ.strip_prefix("int") {
+                ParamType::Int(bits.parse::<usize>().map_err(|_| format!("Invalid int size: {}", bits))?)
+            } else if let Some(bits) = typ.strip_prefix("bytes") {
+                ParamType::FixedBytes(bits.parse::<usize>().map_err(|_| format!("Invalid bytes size: {}", bits))?)
+            } else {
+                match typ {
+                    "bool" => ParamType::Bool,
+                    "string" => ParamType::String,
+                    "address" => ParamType::Address,
+                    _ => return Err(format!("Unsupported type: {}", typ)),
+                }
+            };
+            Ok(FieldType::Primitive(param_type))
+        }
     }
 }
 
@@ -67,7 +71,10 @@ pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
                 } else {
                     (field.trim(), "field")
                 };
-                fields.push((parse_type(typ), name.to_string()));
+                fields.push((
+                    FieldType::from_str(typ).expect(format!("failed to parse type: {}", typ).as_str()),
+                    name.to_string(),
+                ));
                 start = i + 1;
             }
             _ => {}
@@ -94,7 +101,10 @@ pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
         } else {
             (field.trim(), "field")
         };
-        fields.push((parse_type(typ), name.to_string()));
+        fields.push((
+            FieldType::from_str(typ).expect(format!("failed to parse type: {}", typ).as_str()),
+            name.to_string(),
+        ));
     }
     fields
 }
@@ -103,12 +113,7 @@ pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
 pub fn fieldtype_to_paramtype(ft: &FieldType) -> ParamType {
     match ft {
         FieldType::Primitive(p) => p.clone(),
-        FieldType::Tuple(fields) => ParamType::Tuple(
-            fields
-                .iter()
-                .map(|(f, _)| fieldtype_to_paramtype(f))
-                .collect(),
-        ),
+        FieldType::Tuple(fields) => ParamType::Tuple(fields.iter().map(|(f, _)| fieldtype_to_paramtype(f)).collect()),
         FieldType::Array(inner) => ParamType::Array(Box::new(fieldtype_to_paramtype(inner))),
     }
 }
@@ -122,9 +127,7 @@ fn token_to_json(token: &Token) -> Value {
         Token::Int(i) | Token::Uint(i) => json!(i.to_string()),
         Token::Bool(b) => json!(*b),
         Token::String(s) => json!(s),
-        Token::Array(arr) | Token::FixedArray(arr) => {
-            Value::Array(arr.iter().map(token_to_json).collect())
-        }
+        Token::Array(arr) | Token::FixedArray(arr) => Value::Array(arr.iter().map(token_to_json).collect()),
         Token::Tuple(tuple) => Value::Array(tuple.iter().map(token_to_json).collect()),
     }
 }
@@ -139,12 +142,7 @@ pub fn token_to_json_with_schema(ft: &FieldType, token: &Token) -> Value {
             }
             Value::Object(obj)
         }
-        (FieldType::Array(inner_ft), Token::Array(tokens)) => Value::Array(
-            tokens
-                .iter()
-                .map(|t| token_to_json_with_schema(inner_ft, t))
-                .collect(),
-        ),
+        (FieldType::Array(inner_ft), Token::Array(tokens)) => Value::Array(tokens.iter().map(|t| token_to_json_with_schema(inner_ft, t)).collect()),
         _ => Value::Null, // fallback for mismatches
     }
 }
