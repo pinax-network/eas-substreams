@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package contract.v1;
+message Events {
+    repeated Eas_Attested eas_attesteds = 1;
+    repeated Eas_Revoked eas_revokeds = 2;
+    repeated Eas_RevokedOffchain eas_revoked_offchains = 3;
+    repeated Eas_Timestamped eas_timestampeds = 4;
+}
+message Eas_Attested {
+    string evt_tx_hash = 1;
+    uint32 evt_index = 2;
+    google.protobuf.Timestamp evt_block_time = 3;
+    uint64 evt_block_number = 4;
+    bytes recipient = 5;
+    bytes attester = 6;
+    bytes uid = 7;
+    bytes schema_id = 8;
+    bytes data = 9;
+    string schema = 10;
+    string decoded_data = 11;
+}
+message Eas_Revoked {
+    string evt_tx_hash = 1;
+    uint32 evt_index = 2;
+    google.protobuf.Timestamp evt_block_time = 3;
+    uint64 evt_block_number = 4;
+    bytes recipient = 5;
+    bytes attester = 6;
+    bytes uid = 7;
+    bytes schema = 8;
+}
+message Eas_RevokedOffchain {
+    string evt_tx_hash = 1;
+    uint32 evt_index = 2;
+    google.protobuf.Timestamp evt_block_time = 3;
+    uint64 evt_block_number = 4;
+    bytes revoker = 5;
+    bytes data = 6;
+    uint64 timestamp = 7;
+}
+message Eas_Timestamped {
+    string evt_tx_hash = 1;
+    uint32 evt_index = 2;
+    google.protobuf.Timestamp evt_block_time = 3;
+    uint64 evt_block_number = 4;
+    bytes data = 5;
+    uint64 timestamp = 6;
+}
+
