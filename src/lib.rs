@@ -67,11 +67,7 @@ fn extract_attesteds(blk: &eth::Block, events: &mut contract::Events) {
         })
         .collect();
 
-    if attested_events.is_empty() {
-        return;
-    }
-
-    let all_attestations = attested_events
+    let attestations = attested_events
         .chunks(100)
         .flat_map(|chunk| {
             let responses = chunk
@@ -104,7 +100,7 @@ fn extract_attesteds(blk: &eth::Block, events: &mut contract::Events) {
         })
         .collect::<Vec<_>>();
 
-    let schema_ids: Vec<_> = all_attestations
+    let schema_ids: Vec<_> = attestations
         .iter()
         .map(|attestation| attestation.1)
         .collect::<std::collections::HashSet<_>>()
@@ -140,24 +136,29 @@ fn extract_attesteds(blk: &eth::Block, events: &mut contract::Events) {
         })
         .collect();
 
-    for ((view, log, event), attestation) in attested_events.into_iter().zip(all_attestations.into_iter()) {
-        let schema = schemas.get(&attestation.1).expect("schema should exist in map");
-        let decoded_json = serde_json::Value::Object(decode_data(&attestation.9, schema));
+    events.eas_attesteds.extend(
+        attested_events
+            .into_iter()
+            .zip(attestations.into_iter())
+            .map(|((view, log, event), attestation)| {
+                let schema = schemas.get(&attestation.1).expect("schema should exist in map");
+                let decoded_json = serde_json::Value::Object(decode_data(&attestation.9, schema));
 
-        events.eas_attesteds.push(contract::EasAttested {
-            evt_tx_hash: view.transaction.hash.clone(),
-            evt_index: log.block_index,
-            evt_block_time: Some(blk.timestamp().to_owned()),
-            evt_block_number: blk.number,
-            attester: event.attester,
-            recipient: event.recipient,
-            schema_id: Vec::from(event.schema),
-            uid: Vec::from(event.uid),
-            data: attestation.9,
-            schema: schema.to_string(),
-            decoded_data: decoded_json.to_string(),
-        });
-    }
+                contract::EasAttested {
+                    evt_tx_hash: view.transaction.hash.clone(),
+                    evt_index: log.block_index,
+                    evt_block_time: Some(blk.timestamp().to_owned()),
+                    evt_block_number: blk.number,
+                    attester: event.attester,
+                    recipient: event.recipient,
+                    schema_id: Vec::from(event.schema),
+                    uid: Vec::from(event.uid),
+                    data: attestation.9,
+                    schema: schema.to_string(),
+                    decoded_data: decoded_json.to_string(),
+                }
+            }),
+    );
 }
 
 fn extract_revokeds(blk: &eth::Block, events: &mut contract::Events) {
