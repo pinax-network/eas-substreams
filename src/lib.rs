@@ -64,19 +64,27 @@ fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
             let inner_type = &typ[..typ.len() - 2];
             FieldType::Array(Box::new(parse_type(inner_type)))
         } else {
-            let param_type = match typ {
-                "bytes32" => ParamType::FixedBytes(32),
-                "uint8" => ParamType::Uint(8),
-                "uint16" => ParamType::Uint(16),
-                "uint32" => ParamType::Uint(32),
-                "uint64" => ParamType::Uint(64),
-                "uint128" => ParamType::Uint(128),
-                "uint256" => ParamType::Uint(256),
-                "bool" => ParamType::Bool,
-                "string" => ParamType::String,
-                "bytes" => ParamType::Bytes,
-                "address" => ParamType::Address,
-                _ => panic!("Unsupported type: {}", typ),
+            let param_type = if let Some(bits) = typ.strip_prefix("uint") {
+                if let Ok(size) = bits.parse::<usize>() {
+                    ParamType::Uint(size)
+                } else {
+                    panic!("Unsupported uint type: {}", typ)
+                }
+            } else if let Some(bits) = typ.strip_prefix("int") {
+                if let Ok(size) = bits.parse::<usize>() {
+                    ParamType::Int(size)
+                } else {
+                    panic!("Unsupported int type: {}", typ)
+                }
+            } else {
+                match typ {
+                    "bytes32" => ParamType::FixedBytes(32),
+                    "bool" => ParamType::Bool,
+                    "string" => ParamType::String,
+                    "bytes" => ParamType::Bytes,
+                    "address" => ParamType::Address,
+                    _ => panic!("Unsupported type: {}", typ),
+                }
             };
             FieldType::Primitive(param_type)
         }
