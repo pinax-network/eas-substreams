@@ -24,10 +24,20 @@ pub fn bytes_to_hex(bytes: &[u8]) -> String {
     }
 }
 
+#[derive(Debug, Clone)]
+enum FieldType {
+    Primitive(ParamType),
+    Tuple(Vec<(FieldType, String)>),
+    Array(Box<FieldType>),
+}
+
 /// Decodes ABI-encoded attestation data into a JSON map using the schema signature string.
 pub fn decode_data(data: &[u8], schema_signature: &str) -> Map<String, Value> {
     let fields = parse_schema_fields(schema_signature);
-    let types = fields.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>();
+    let types = fields
+        .iter()
+        .map(|(t, _)| fieldtype_to_paramtype(t))
+        .collect::<Vec<_>>();
     let tokens = match decode(&types, data) {
         Ok(tokens) => tokens,
         Err(e) => {
@@ -36,28 +46,25 @@ pub fn decode_data(data: &[u8], schema_signature: &str) -> Map<String, Value> {
         }
     };
     let mut obj = Map::new();
-    for ((_, name), token) in fields.into_iter().zip(tokens.into_iter()) {
-        obj.insert(name, token_to_json(&token));
+    for ((ft, name), token) in fields.into_iter().zip(tokens.into_iter()) {
+        obj.insert(name, token_to_json_with_schema(&ft, &token));
     }
     obj
 }
 
-/// Parses a schema signature string into a Vec<(ParamType, String)>.
-fn parse_schema_fields(schema: &str) -> Vec<(ParamType, String)> {
-    fn parse_type(typ: &str) -> ParamType {
+/// Parses a schema signature string into a Vec<(FieldType, String)>.
+fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
+    fn parse_type(typ: &str) -> FieldType {
         let typ = typ.trim();
         if typ.starts_with("tuple(") && typ.ends_with(')') {
             let inner = &typ[6..typ.len() - 1];
-            let inner_types = parse_schema_fields(inner)
-                .into_iter()
-                .map(|(t, _)| t)
-                .collect();
-            ParamType::Tuple(inner_types)
+            let fields = parse_schema_fields(inner);
+            FieldType::Tuple(fields)
         } else if typ.ends_with("[]") {
             let inner_type = &typ[..typ.len() - 2];
-            ParamType::Array(Box::new(parse_type(inner_type)))
+            FieldType::Array(Box::new(parse_type(inner_type)))
         } else {
-            match typ {
+            let param_type = match typ {
                 "bytes32" => ParamType::FixedBytes(32),
                 "uint8" => ParamType::Uint(8),
                 "uint16" => ParamType::Uint(16),
@@ -70,7 +77,8 @@ fn parse_schema_fields(schema: &str) -> Vec<(ParamType, String)> {
                 "bytes" => ParamType::Bytes,
                 "address" => ParamType::Address,
                 _ => panic!("Unsupported type: {}", typ),
-            }
+            };
+            FieldType::Primitive(param_type)
         }
     }
 
@@ -85,7 +93,6 @@ fn parse_schema_fields(schema: &str) -> Vec<(ParamType, String)> {
             ')' => depth -= 1,
             ',' if depth == 0 => {
                 let field = &schema[start..i];
-                // Improved: Find last whitespace outside parentheses for type/name split
                 let mut type_end = 0;
                 let mut inner_depth = 0;
                 for (j, ch) in field.char_indices().rev() {
@@ -136,6 +143,20 @@ fn parse_schema_fields(schema: &str) -> Vec<(ParamType, String)> {
     fields
 }
 
+// Add a helper to convert FieldType to ParamType for ABI decoding
+fn fieldtype_to_paramtype(ft: &FieldType) -> ParamType {
+    match ft {
+        FieldType::Primitive(p) => p.clone(),
+        FieldType::Tuple(fields) => ParamType::Tuple(
+            fields
+                .iter()
+                .map(|(f, _)| fieldtype_to_paramtype(f))
+                .collect(),
+        ),
+        FieldType::Array(inner) => ParamType::Array(Box::new(fieldtype_to_paramtype(inner))),
+    }
+}
+
 fn token_to_json(token: &Token) -> Value {
     match token {
         Token::Address(addr) => json!(format!("0x{}", Hex::encode(addr))),
@@ -149,6 +170,26 @@ fn token_to_json(token: &Token) -> Value {
             Value::Array(arr.iter().map(token_to_json).collect())
         }
         Token::Tuple(tuple) => Value::Array(tuple.iter().map(token_to_json).collect()),
+    }
+}
+
+fn token_to_json_with_schema(ft: &FieldType, token: &Token) -> Value {
+    match (ft, token) {
+        (FieldType::Primitive(_), t) => token_to_json(t),
+        (FieldType::Tuple(fields), Token::Tuple(tokens)) => {
+            let mut obj = serde_json::Map::new();
+            for ((field, name), token) in fields.iter().zip(tokens.iter()) {
+                obj.insert(name.clone(), token_to_json_with_schema(field, token));
+            }
+            Value::Object(obj)
+        }
+        (FieldType::Array(inner_ft), Token::Array(tokens)) => Value::Array(
+            tokens
+                .iter()
+                .map(|t| token_to_json_with_schema(inner_ft, t))
+                .collect(),
+        ),
+        _ => Value::Null, // fallback for mismatches
     }
 }
 
