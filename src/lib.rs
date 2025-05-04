@@ -8,6 +8,7 @@ use hex_literal::hex;
 use pb::contract::v1 as contract;
 use serde_json::{Map, Value};
 use substreams_ethereum::pb::eth::v2 as eth;
+use substreams_ethereum::rpc::RpcBatch;
 use substreams_ethereum::Event;
 
 substreams_ethereum::init!();
@@ -49,42 +50,107 @@ pub struct Schema {
 }
 
 fn extract_attesteds(blk: &eth::Block, events: &mut contract::Events) {
-    events.eas_attesteds.append(
-        &mut blk
-            .receipts()
-            .flat_map(|view| {
-                view.receipt.logs.iter().filter(|log| log.address == EAS_TRACKED_CONTRACT).filter_map(|log| {
+    let attested_events: Vec<_> = blk
+        .receipts()
+        .flat_map(|view| {
+            view.receipt
+                .logs
+                .iter()
+                .filter(|log| log.address == EAS_TRACKED_CONTRACT)
+                .filter_map(move |log| {
                     if let Some(event) = abi::eas_contract::events::Attested::match_and_decode(log) {
-                        let attestation = GetAttestation { uid: event.uid }
-                            .call(EAS_TRACKED_CONTRACT.to_vec())
-                            .expect("failed to get attestation");
-                        let schema_id = attestation.1;
-                        let data = attestation.9;
-                        let schema = GetSchema { uid: schema_id }
-                            .call(EAS_SCHEMA_REGISTRY_CONTRACT.to_vec())
-                            .expect("failed to get schema");
-                        let schema = schema.3;
-                        let decoded_json = serde_json::Value::Object(decode_data(&data, &schema));
-
-                        return Some(contract::EasAttested {
-                            evt_tx_hash: view.transaction.hash.clone(),
-                            evt_index: log.block_index,
-                            evt_block_time: Some(blk.timestamp().to_owned()),
-                            evt_block_number: blk.number,
-                            attester: event.attester,
-                            recipient: event.recipient,
-                            schema_id: Vec::from(event.schema),
-                            uid: Vec::from(event.uid),
-                            data: Vec::from(data),
-                            schema,
-                            decoded_data: decoded_json.to_string(),
-                        });
+                        Some((view, log, event))
+                    } else {
+                        None
                     }
-                    None
                 })
+        })
+        .collect();
+
+    for chunk in attested_events.chunks(100) {
+        let attestation_responses = chunk
+            .iter()
+            .fold(RpcBatch::new(), |batch, (_, _, event)| {
+                batch.add(GetAttestation { uid: event.uid }, EAS_TRACKED_CONTRACT.to_vec())
             })
-            .collect(),
-    );
+            .execute()
+            .expect("failed to execute attestation RPC batch")
+            .responses;
+
+        let mut schema_ids = std::collections::HashSet::new();
+        let attestations: Vec<_> = attestation_responses
+            .into_iter()
+            .map(|response| {
+                let attestation = RpcBatch::decode::<
+                    (
+                        [u8; 32],                   // uid
+                        [u8; 32],                   // schema
+                        substreams::scalar::BigInt, // recipient
+                        substreams::scalar::BigInt, // attester
+                        substreams::scalar::BigInt, // time
+                        [u8; 32],                   // expirationTime
+                        Vec<u8>,                    // refUID
+                        Vec<u8>,                    // resolver
+                        bool,                       // revocable
+                        Vec<u8>,                    // data
+                    ),
+                    GetAttestation,
+                >(&response)
+                .expect("failed to decode attestation");
+
+                schema_ids.insert(attestation.1);
+
+                attestation
+            })
+            .collect();
+
+        let schema_ids: Vec<_> = schema_ids.into_iter().collect();
+
+        let schema_responses = schema_ids
+            .iter()
+            .fold(RpcBatch::new(), |batch, schema_id| {
+                batch.add(GetSchema { uid: *schema_id }, EAS_SCHEMA_REGISTRY_CONTRACT.to_vec())
+            })
+            .execute()
+            .expect("failed to execute schema RPC batch")
+            .responses;
+
+        let schema_map = schema_responses.into_iter().fold(std::collections::HashMap::new(), |mut map, response| {
+            let schema = RpcBatch::decode::<
+                (
+                    [u8; 32], // uid
+                    Vec<u8>,  // resolver
+                    bool,     // revocable
+                    String,   // schema
+                ),
+                GetSchema,
+            >(&response)
+            .expect("failed to decode schema");
+
+            map.insert(schema.0, schema.3);
+            map
+        });
+
+        // Create EasAttested objects and add to events
+        for ((view, log, event), attestation) in chunk.iter().zip(attestations.iter()) {
+            let schema = schema_map.get(&attestation.1).expect("schema should exist in map");
+            let decoded_json = serde_json::Value::Object(decode_data(&attestation.9, schema));
+
+            events.eas_attesteds.push(contract::EasAttested {
+                evt_tx_hash: view.transaction.hash.clone(),
+                evt_index: log.block_index,
+                evt_block_time: Some(blk.timestamp().to_owned()),
+                evt_block_number: blk.number,
+                attester: event.attester.clone(),
+                recipient: event.recipient.clone(),
+                schema_id: Vec::from(event.schema),
+                uid: Vec::from(event.uid),
+                data: attestation.9.clone(),
+                schema: schema.to_string(),
+                decoded_data: decoded_json.to_string(),
+            });
+        }
+    }
 }
 
 fn extract_revokeds(blk: &eth::Block, events: &mut contract::Events) {
