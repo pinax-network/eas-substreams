@@ -71,41 +71,16 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
             .flat_map(|view| {
                 view.receipt.logs.iter().filter(|log| log.address == EAS_TRACKED_CONTRACT).filter_map(|log| {
                     if let Some(event) = abi::eas_contract::events::Attested::match_and_decode(log) {
-                        let res = GetAttestation { uid: event.uid }
+                        let attestation = GetAttestation { uid: event.uid }
                             .call(EAS_TRACKED_CONTRACT.to_vec())
                             .expect("failed to get attestation");
-                        let attestation = Attestation {
-                            uid: res.0,
-                            schema: res.1,
-                            time: res.2.to_u64(),
-                            expiration_time: res.3.to_u64(),
-                            revocation_time: res.4.to_u64(),
-                            ref_uid: res.5,
-                            recipient: {
-                                let mut arr = [0u8; 20];
-                                arr.copy_from_slice(&res.6);
-                                arr
-                            },
-                            attester: {
-                                let mut arr = [0u8; 20];
-                                arr.copy_from_slice(&res.7);
-                                arr
-                            },
-                            revocable: res.8,
-                            data: res.9,
-                        };
-                        let res = GetSchema { uid: attestation.schema }
+                        let schema_id = attestation.1;
+                        let data = attestation.9;
+                        let schema = GetSchema { uid: schema_id }
                             .call(EAS_SCHEMA_REGISTRY_CONTRACT.to_vec())
                             .expect("failed to get schema");
-
-                        let schema = Schema {
-                            uid_id: res.0,
-                            resolver: res.1,
-                            revocable: res.2,
-                            schema: res.3,
-                        };
-
-                        let decoded_json = serde_json::Value::Object(decode_data(&attestation.data, &schema.schema));
+                        let schema = schema.3;
+                        let decoded_json = serde_json::Value::Object(decode_data(&data, &schema));
 
                         return Some(contract::EasAttested {
                             evt_tx_hash: Hex(&view.transaction.hash).to_string(),
@@ -116,12 +91,11 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
                             recipient: event.recipient,
                             schema_id: Vec::from(event.schema),
                             uid: Vec::from(event.uid),
-                            data: Vec::from(attestation.data),
-                            schema: schema.schema,
+                            data: Vec::from(data),
+                            schema,
                             decoded_data: decoded_json.to_string(),
                         });
                     }
-
                     None
                 })
             })
