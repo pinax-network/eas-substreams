@@ -7,7 +7,6 @@ use ethabi::decode;
 use hex_literal::hex;
 use pb::contract::v1 as contract;
 use serde_json::{Map, Value};
-use substreams::Hex;
 use substreams_ethereum::pb::eth::v2 as eth;
 use substreams_ethereum::Event;
 
@@ -15,14 +14,6 @@ substreams_ethereum::init!();
 
 const EAS_TRACKED_CONTRACT: [u8; 20] = hex!("4200000000000000000000000000000000000021");
 const EAS_SCHEMA_REGISTRY_CONTRACT: [u8; 20] = hex!("4200000000000000000000000000000000000020");
-
-pub fn bytes_to_hex(bytes: &[u8]) -> String {
-    if bytes.is_empty() {
-        return "".to_string();
-    } else {
-        format! {"0x{}", Hex::encode(bytes)}.to_string()
-    }
-}
 
 /// Decodes ABI-encoded attestation data into a JSON map using the schema signature string.
 pub fn decode_data(data: &[u8], schema_signature: &str) -> Map<String, Value> {
@@ -83,7 +74,7 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
                         let decoded_json = serde_json::Value::Object(decode_data(&data, &schema));
 
                         return Some(contract::EasAttested {
-                            evt_tx_hash: bytes_to_hex(&view.transaction.hash),
+                            evt_tx_hash: view.transaction.hash.clone(),
                             evt_index: log.block_index,
                             evt_block_time: Some(blk.timestamp().to_owned()),
                             evt_block_number: blk.number,
@@ -108,7 +99,7 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
                 view.receipt.logs.iter().filter(|log| log.address == EAS_TRACKED_CONTRACT).filter_map(|log| {
                     if let Some(event) = abi::eas_contract::events::Revoked::match_and_decode(log) {
                         return Some(contract::EasRevoked {
-                            evt_tx_hash: bytes_to_hex(&view.transaction.hash),
+                            evt_tx_hash: view.transaction.hash.clone(),
                             evt_index: log.block_index,
                             evt_block_time: Some(blk.timestamp().to_owned()),
                             evt_block_number: blk.number,
@@ -131,7 +122,7 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
                 view.receipt.logs.iter().filter(|log| log.address == EAS_TRACKED_CONTRACT).filter_map(|log| {
                     if let Some(event) = abi::eas_contract::events::RevokedOffchain::match_and_decode(log) {
                         return Some(contract::EasRevokedOffchain {
-                            evt_tx_hash: bytes_to_hex(&view.transaction.hash),
+                            evt_tx_hash: view.transaction.hash.clone(),
                             evt_index: log.block_index,
                             evt_block_time: Some(blk.timestamp().to_owned()),
                             evt_block_number: blk.number,
@@ -153,7 +144,7 @@ fn map_eas_events(blk: &eth::Block, events: &mut contract::Events) {
                 view.receipt.logs.iter().filter(|log| log.address == EAS_TRACKED_CONTRACT).filter_map(|log| {
                     if let Some(event) = abi::eas_contract::events::Timestamped::match_and_decode(log) {
                         return Some(contract::EasTimestamped {
-                            evt_tx_hash: bytes_to_hex(&view.transaction.hash),
+                            evt_tx_hash: view.transaction.hash.clone(),
                             evt_index: log.block_index,
                             evt_block_time: Some(blk.timestamp().to_owned()),
                             evt_block_number: blk.number,
