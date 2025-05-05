@@ -102,7 +102,6 @@ pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
         let field = &schema[start..];
         fields.push(parse_field(field.trim()));
     }
-    substreams::log::info!("Parsed schema fields: {:?}", fields);
     fields
 }
 

@@ -17,21 +17,29 @@ const EAS_TRACKED_CONTRACT: [u8; 20] = hex!("42000000000000000000000000000000000
 const EAS_SCHEMA_REGISTRY_CONTRACT: [u8; 20] = hex!("4200000000000000000000000000000000000020");
 
 /// Decodes ABI-encoded attestation data into a JSON map using the schema signature string.
+/// Returns an empty Map if the data cannot be decoded with the schema.
 pub fn decode_data(data: &[u8], schema_signature: &str) -> Map<String, Value> {
     // Strip outer parentheses if the entire schema is wrapped in them
-    let schema_to_parse = if schema_signature.starts_with('(') && schema_signature.ends_with(')') && schema_signature.len() > 2 {
+    let schema_signature = if schema_signature.starts_with('(') && schema_signature.ends_with(')') && schema_signature.len() > 2 {
         &schema_signature[1..schema_signature.len() - 1]
     } else {
         schema_signature
     };
-
-    let fields = schema_parser::parse_schema_fields(schema_to_parse);
+    let fields = schema_parser::parse_schema_fields(schema_signature);
     let types = fields.iter().map(|(t, _)| schema_parser::fieldtype_to_paramtype(t)).collect::<Vec<_>>();
-    let tokens = decode(&types, data).expect(format!("Failed to decode data with schema: {}", schema_signature).as_str());
-    fields.into_iter().zip(tokens.into_iter()).fold(Map::new(), |mut obj, ((ft, name), token)| {
-        obj.insert(name, schema_parser::token_to_json_with_schema(&ft, &token));
-        obj
-    })
+
+    match decode(&types, data) {
+        Ok(tokens) => fields.into_iter().zip(tokens.into_iter()).fold(Map::new(), |mut obj, ((ft, name), token)| {
+            obj.insert(name, schema_parser::token_to_json_with_schema(&ft, &token));
+            obj
+        }),
+        Err(e) => {
+            substreams::log::info!("Error decoding data with schema {}: {:?}", schema_signature, e);
+            let mut obj = Map::new();
+            obj.insert("error".to_string(), Value::String(format!("Failed to decode: {}", e)));
+            obj
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
