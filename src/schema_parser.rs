@@ -7,7 +7,7 @@ use substreams::Hex;
 pub enum FieldType {
     Primitive(ParamType),
     Tuple(Vec<(FieldType, String)>),
-    Array(Box<FieldType>),          // Dynamic array (type[])
+    Array(Box<FieldType>),             // Dynamic array (type[])
     FixedArray(Box<FieldType>, usize), // Fixed-size array (type[N])
 }
 
@@ -17,6 +17,9 @@ impl FromStr for FieldType {
         let typ = typ.trim();
         if typ.starts_with("tuple(") && typ.ends_with(')') {
             Ok(FieldType::Tuple(parse_schema_fields(&typ[6..typ.len() - 1])))
+        } else if typ.starts_with('(') && typ.ends_with(')') && !typ.ends_with("[]") {
+            // Handle tuples in the format (type1 name1, type2 name2)
+            Ok(FieldType::Tuple(parse_schema_fields(&typ[1..typ.len() - 1])))
         } else if typ.ends_with("[]") {
             // Handle dynamic arrays (ending with [])
             Ok(FieldType::Array(Box::new(FieldType::from_str(&typ[..typ.len() - 2])?)))
@@ -26,13 +29,12 @@ impl FromStr for FieldType {
                 let size_str = &typ[pos + 1..typ.len() - 1];
                 // If size_str is empty, it's a dynamic array ([]), which we already handled
                 if !size_str.is_empty() {
-                    let size = size_str.parse::<usize>()
-                        .map_err(|_| format!("Invalid array size: {}", size_str))?;
+                    let size = size_str.parse::<usize>().map_err(|_| format!("Invalid array size: {}", size_str))?;
                     let base_type = &typ[0..pos];
                     return Ok(FieldType::FixedArray(Box::new(FieldType::from_str(base_type)?), size));
                 }
             }
-            
+
             // If we get here, it's an invalid array format
             return Err(format!("Invalid array format: {}", typ));
         } else {
@@ -140,7 +142,9 @@ pub fn token_to_json_with_schema(ft: &FieldType, token: &Token) -> Value {
             Value::Object(obj)
         }
         (FieldType::Array(inner_ft), Token::Array(tokens)) => Value::Array(tokens.iter().map(|t| token_to_json_with_schema(inner_ft, t)).collect()),
-        (FieldType::FixedArray(inner_ft, _), Token::FixedArray(tokens)) => Value::Array(tokens.iter().map(|t| token_to_json_with_schema(inner_ft, t)).collect()),
+        (FieldType::FixedArray(inner_ft, _), Token::FixedArray(tokens)) => {
+            Value::Array(tokens.iter().map(|t| token_to_json_with_schema(inner_ft, t)).collect())
+        }
         _ => Value::Null, // fallback for mismatches
     }
 }
