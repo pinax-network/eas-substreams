@@ -1,7 +1,7 @@
 specVersion: v0.1.0
 package:
   name: eas
-  version: v0.2.2
+  version: v0.2.3
 
 imports:
     ethcommon: https://spkg.io/streamingfast/ethereum-common-v0.3.1.spkg

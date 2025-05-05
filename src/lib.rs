@@ -18,7 +18,14 @@ const EAS_SCHEMA_REGISTRY_CONTRACT: [u8; 20] = hex!("420000000000000000000000000
 
 /// Decodes ABI-encoded attestation data into a JSON map using the schema signature string.
 pub fn decode_data(data: &[u8], schema_signature: &str) -> Map<String, Value> {
-    let fields = schema_parser::parse_schema_fields(schema_signature);
+    // Strip outer parentheses if the entire schema is wrapped in them
+    let schema_to_parse = if schema_signature.starts_with('(') && schema_signature.ends_with(')') && schema_signature.len() > 2 {
+        &schema_signature[1..schema_signature.len() - 1]
+    } else {
+        schema_signature
+    };
+
+    let fields = schema_parser::parse_schema_fields(schema_to_parse);
     let types = fields.iter().map(|(t, _)| schema_parser::fieldtype_to_paramtype(t)).collect::<Vec<_>>();
     let tokens = decode(&types, data).expect(format!("Failed to decode data with schema: {}", schema_signature).as_str());
     fields.into_iter().zip(tokens.into_iter()).fold(Map::new(), |mut obj, ((ft, name), token)| {

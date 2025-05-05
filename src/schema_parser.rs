@@ -85,8 +85,7 @@ pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
     let mut fields = Vec::new();
     let mut depth = 0;
     let mut start = 0;
-    let chars: Vec<_> = schema.chars().collect();
-    for (i, c) in chars.iter().enumerate() {
+    for (i, c) in schema.chars().enumerate() {
         match c {
             '(' => depth += 1,
             ')' => depth -= 1,
