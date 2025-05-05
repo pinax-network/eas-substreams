@@ -7,7 +7,8 @@ use substreams::Hex;
 pub enum FieldType {
     Primitive(ParamType),
     Tuple(Vec<(FieldType, String)>),
-    Array(Box<FieldType>),
+    Array(Box<FieldType>),          // Dynamic array (type[])
+    FixedArray(Box<FieldType>, usize), // Fixed-size array (type[N])
 }
 
 impl FromStr for FieldType {
@@ -17,7 +18,23 @@ impl FromStr for FieldType {
         if typ.starts_with("tuple(") && typ.ends_with(')') {
             Ok(FieldType::Tuple(parse_schema_fields(&typ[6..typ.len() - 1])))
         } else if typ.ends_with("[]") {
+            // Handle dynamic arrays (ending with [])
             Ok(FieldType::Array(Box::new(FieldType::from_str(&typ[..typ.len() - 2])?)))
+        } else if let Some(pos) = typ.rfind('[') {
+            if typ.ends_with(']') {
+                // Handle fixed-size arrays [N] and potentially nested arrays
+                let size_str = &typ[pos + 1..typ.len() - 1];
+                // If size_str is empty, it's a dynamic array ([]), which we already handled
+                if !size_str.is_empty() {
+                    let size = size_str.parse::<usize>()
+                        .map_err(|_| format!("Invalid array size: {}", size_str))?;
+                    let base_type = &typ[0..pos];
+                    return Ok(FieldType::FixedArray(Box::new(FieldType::from_str(base_type)?), size));
+                }
+            }
+            
+            // If we get here, it's an invalid array format
+            return Err(format!("Invalid array format: {}", typ));
         } else {
             let param_type = if typ == "bytes" {
                 ParamType::Bytes
@@ -94,6 +111,7 @@ pub fn fieldtype_to_paramtype(ft: &FieldType) -> ParamType {
         FieldType::Primitive(p) => p.clone(),
         FieldType::Tuple(fields) => ParamType::Tuple(fields.iter().map(|(f, _)| fieldtype_to_paramtype(f)).collect()),
         FieldType::Array(inner) => ParamType::Array(Box::new(fieldtype_to_paramtype(inner))),
+        FieldType::FixedArray(inner, size) => ParamType::FixedArray(Box::new(fieldtype_to_paramtype(inner)), *size),
     }
 }
 
@@ -122,6 +140,7 @@ pub fn token_to_json_with_schema(ft: &FieldType, token: &Token) -> Value {
             Value::Object(obj)
         }
         (FieldType::Array(inner_ft), Token::Array(tokens)) => Value::Array(tokens.iter().map(|t| token_to_json_with_schema(inner_ft, t)).collect()),
+        (FieldType::FixedArray(inner_ft, _), Token::FixedArray(tokens)) => Value::Array(tokens.iter().map(|t| token_to_json_with_schema(inner_ft, t)).collect()),
         _ => Value::Null, // fallback for mismatches
     }
 }
