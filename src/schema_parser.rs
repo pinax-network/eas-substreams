@@ -16,10 +16,10 @@ impl FromStr for FieldType {
     fn from_str(typ: &str) -> Result<Self, Self::Err> {
         let typ = typ.trim();
         if typ.starts_with("tuple(") && typ.ends_with(')') {
-            Ok(FieldType::Tuple(parse_schema_fields(&typ[6..typ.len() - 1])))
+            Ok(FieldType::Tuple(parse_schema_fields(&typ[6..typ.len() - 1])?))
         } else if typ.starts_with('(') && typ.ends_with(')') && !typ.ends_with("[]") {
             // Handle tuples in the format (type1 name1, type2 name2)
-            Ok(FieldType::Tuple(parse_schema_fields(&typ[1..typ.len() - 1])))
+            Ok(FieldType::Tuple(parse_schema_fields(&typ[1..typ.len() - 1])?))
         } else if typ.ends_with("[]") {
             // Handle dynamic arrays (ending with [])
             Ok(FieldType::Array(Box::new(FieldType::from_str(&typ[..typ.len() - 2])?)))
@@ -59,7 +59,38 @@ impl FromStr for FieldType {
     }
 }
 
-fn parse_field(field: &str) -> (FieldType, String) {
+pub fn parse_schema_fields(schema: &str) -> Result<Vec<(FieldType, String)>, String> {
+    let mut fields = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+    let chars: Vec<_> = schema.chars().collect();
+    for (i, c) in chars.iter().enumerate() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                let field = &schema[start..i];
+                match parse_field(field.trim()) {
+                    Ok(parsed_field) => fields.push(parsed_field),
+                    Err(e) => return Err(format!("Failed to parse field '{}': {}", field.trim(), e)),
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    // Last field
+    if start < schema.len() {
+        let field = &schema[start..];
+        match parse_field(field.trim()) {
+            Ok(parsed_field) => fields.push(parsed_field),
+            Err(e) => return Err(format!("Failed to parse field '{}': {}", field.trim(), e)),
+        }
+    }
+    Ok(fields)
+}
+
+fn parse_field(field: &str) -> Result<(FieldType, String), String> {
     let mut type_end = 0;
     let mut inner_depth = 0;
     for (j, ch) in field.char_indices().rev() {
@@ -78,31 +109,10 @@ fn parse_field(field: &str) -> (FieldType, String) {
     } else {
         (field.trim(), "field")
     };
-    (FieldType::from_str(typ).expect(&format!("failed to parse type: {}", typ)), name.to_string())
-}
-
-pub fn parse_schema_fields(schema: &str) -> Vec<(FieldType, String)> {
-    let mut fields = Vec::new();
-    let mut depth = 0;
-    let mut start = 0;
-    for (i, c) in schema.chars().enumerate() {
-        match c {
-            '(' => depth += 1,
-            ')' => depth -= 1,
-            ',' if depth == 0 => {
-                let field = &schema[start..i];
-                fields.push(parse_field(field.trim()));
-                start = i + 1;
-            }
-            _ => {}
-        }
+    match FieldType::from_str(typ) {
+        Ok(field_type) => Ok((field_type, name.to_string())),
+        Err(e) => Err(format!("Failed to parse type '{}': {}", typ, e)),
     }
-    // Last field
-    if start < schema.len() {
-        let field = &schema[start..];
-        fields.push(parse_field(field.trim()));
-    }
-    fields
 }
 
 // Add a helper to convert FieldType to ParamType for ABI decoding

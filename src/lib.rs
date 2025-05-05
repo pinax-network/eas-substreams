@@ -17,7 +17,7 @@ const EAS_TRACKED_CONTRACT: [u8; 20] = hex!("42000000000000000000000000000000000
 const EAS_SCHEMA_REGISTRY_CONTRACT: [u8; 20] = hex!("4200000000000000000000000000000000000020");
 
 /// Decodes ABI-encoded attestation data into a JSON map using the schema signature string.
-/// Returns an empty Map if the data cannot be decoded with the schema.
+/// Returns a Map with error information if the schema or data cannot be decoded.
 pub fn decode_data(data: &[u8], schema_signature: &str) -> Map<String, Value> {
     // Strip outer parentheses if the entire schema is wrapped in them
     let schema_signature = if schema_signature.starts_with('(') && schema_signature.ends_with(')') && schema_signature.len() > 2 {
@@ -25,19 +25,25 @@ pub fn decode_data(data: &[u8], schema_signature: &str) -> Map<String, Value> {
     } else {
         schema_signature
     };
-    let fields = schema_parser::parse_schema_fields(schema_signature);
-    let types = fields.iter().map(|(t, _)| schema_parser::fieldtype_to_paramtype(t)).collect::<Vec<_>>();
 
-    match decode(&types, data) {
-        Ok(tokens) => fields.into_iter().zip(tokens.into_iter()).fold(Map::new(), |mut obj, ((ft, name), token)| {
-            obj.insert(name, schema_parser::token_to_json_with_schema(&ft, &token));
-            obj
-        }),
+    // Try to parse the schema fields
+    match schema_parser::parse_schema_fields(schema_signature) {
+        Ok(fields) => {
+            let types = fields.iter().map(|(t, _)| schema_parser::fieldtype_to_paramtype(t)).collect::<Vec<_>>();
+            match decode(&types, data) {
+                Ok(tokens) => fields.into_iter().zip(tokens.into_iter()).fold(Map::new(), |mut res, ((ft, name), token)| {
+                    res.insert(name, schema_parser::token_to_json_with_schema(&ft, &token));
+                    res
+                }),
+                Err(e) => {
+                    substreams::log::info!("Error decoding data with schema {}: {:?}", schema_signature, e);
+                    Map::from_iter([("error".to_string(), Value::String("Invalid data".to_string()))])
+                }
+            }
+        }
         Err(e) => {
-            substreams::log::info!("Error decoding data with schema {}: {:?}", schema_signature, e);
-            let mut obj = Map::new();
-            obj.insert("error".to_string(), Value::String(format!("Failed to decode: {}", e)));
-            obj
+            substreams::log::info!("Error parsing schema {}: {:?}", schema_signature, e);
+            Map::from_iter([("error".to_string(), Value::String("Invalid schema".to_string()))])
         }
     }
 }
